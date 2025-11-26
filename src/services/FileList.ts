@@ -7,23 +7,42 @@ import { getDavNameSpaces, getDavProperties } from '@nextcloud/files'
 import { client } from './WebdavClient'
 import { genFileInfo, type FileInfo } from '../utils/fileUtils'
 import type { FileStat, ResponseDataDetailed } from 'webdav'
+import logger from './logger.js'
 
 /**
  * Retrieve the files list
- * @param path
- * @param options
+ * @param path - Directory path to fetch contents from
+ * @param options - Additional options for the request
  */
 export default async function(path: string, options = {}): Promise<FileInfo[]> {
-	const response = await client.getDirectoryContents(path, Object.assign({
-		data: `<?xml version="1.0"?>
-			<d:propfind ${getDavNameSpaces()}>
-				<d:prop>
-					<oc:tags />
-					${getDavProperties()}
-				</d:prop>
-			</d:propfind>`,
-		details: true,
-	}, options)) as ResponseDataDetailed<FileStat[]>
+	logger.debug('[FileList] Fetching directory contents', { path })
 
-	return response.data.map(genFileInfo)
+	try {
+		const response = await client.getDirectoryContents(path, Object.assign({
+			data: `<?xml version="1.0"?>
+				<d:propfind ${getDavNameSpaces()}>
+					<d:prop>
+						<oc:tags />
+						${getDavProperties()}
+					</d:prop>
+				</d:propfind>`,
+			details: true,
+		}, options)) as ResponseDataDetailed<FileStat[]>
+
+		const fileInfos = response.data.map(genFileInfo)
+
+		logger.debug('[FileList] Directory contents fetched successfully', {
+			path,
+			fileCount: fileInfos.length,
+			files: fileInfos.slice(0, 10).map(f => f.basename), // Log first 10 files
+		})
+
+		return fileInfos
+	} catch (error) {
+		// Don't log AbortError as it's expected when cancelling requests
+		if ((error as Error).name !== 'AbortError') {
+			logger.error('[FileList] Failed to fetch directory contents', { path, error })
+		}
+		throw error
+	}
 }

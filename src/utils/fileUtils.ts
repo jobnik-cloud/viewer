@@ -59,10 +59,23 @@ export interface FileInfo {
  * @return [dirPath, fileName]
  */
 export function extractFilePaths(path: string): [string, string] {
-	const pathSections = path.split('/')
-	const fileName = pathSections[pathSections.length - 1]
+	// Validate input
+	if (!path || typeof path !== 'string') {
+		console.warn('[fileUtils] Invalid path provided to extractFilePaths:', path)
+		return ['/', '']
+	}
+
+	// Normalize path: remove multiple consecutive slashes and trailing slash
+	const normalizedPath = path.replace(/\/+/g, '/').replace(/\/$/, '')
+
+	const pathSections = normalizedPath.split('/')
+	const fileName = pathSections[pathSections.length - 1] || ''
 	const dirPath = pathSections.slice(0, pathSections.length - 1).join('/')
-	return [dirPath, fileName]
+
+	// Ensure dirPath is at least '/' for root directory
+	const finalDirPath = dirPath || '/'
+
+	return [finalDirPath, fileName]
 }
 
 /**

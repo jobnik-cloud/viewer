@@ -749,8 +749,16 @@ export default defineComponent({
 
 			// check if part of a group, if so retrieve full files list
 			const group = this.mimeGroups[mime]
+
+			logger.debug('[Viewer] Checking MIME group for navigation', {
+				mime,
+				group,
+				hasFilesProvided: this.files && this.files.length > 0,
+				isEmbedded: this.el !== null,
+			})
+
 			if (this.files && this.files.length > 0) {
-				logger.debug('A files list have been provided. No folder content will be fetched.')
+				logger.debug('[Viewer] A files list have been provided. No folder content will be fetched.')
 				// we won't sort files here, let's use the order the array has
 				this.fileList = this.files
 
@@ -766,40 +774,118 @@ export default defineComponent({
 				this.cancelRequestFolder = cancelRequestFolder
 				const [dirPath] = extractFilePaths(fileInfo.filename)
 
+				logger.debug('[Viewer] Fetching folder contents for navigation', {
+					dirPath,
+					filename: fileInfo.filename,
+					allowedMimes: mimes,
+				})
+
+				// Initialize with single file in case request fails
 				this.currentIndex = 0
 				this.fileList = [fileInfo]
 
-				const fileList = await folderRequest(dirPath)
+				try {
+					const fileList = await folderRequest(dirPath)
 
-				// filter out the unwanted mimes
-				const filteredFiles = fileList.filter(file => file.mime && mimes.indexOf(file.mime) !== -1)
+					// Check if we got a valid response
+					if (!fileList || !Array.isArray(fileList)) {
+						logger.warn('[Viewer] Invalid file list response, using single file mode', { fileList })
+						this.updatePreviousNext()
+						return
+					}
 
-				// sort like the files list
-				// TODO: implement global sorting API
-				// https://github.com/nextcloud/server/blob/a83b79c5f8ab20ed9b4d751167417a65fa3c42b8/apps/files/lib/Controller/ApiController.php#L247
-				const nodes = filteredFiles.map(
-					file => new NcFile({
-						source: davRemoteURL + davGetRootPath() + file.filename,
-						id: file.fileid,
-						displayname: file.displayname,
-						mime: file.mime,
-						mtime: new Date(file.lastmod),
-						owner: this.currentFile.ownerId,
-						root: davGetRootPath(),
-					}),
-				)
-				const sortedNodes = sortNodes(nodes, {
-					sortingMode: this.sortingConfig.key,
-					sortingOrder: this.sortingConfig.asc ? 'asc' : 'desc',
-				})
+					logger.debug('[Viewer] Folder contents received', {
+						dirPath,
+						totalFiles: fileList.length,
+					})
 
-				this.fileList = sortedNodes.map(node => {
-					return filteredFiles.find(file => file.filename === node.path)
-				})
-				// store current position
-				this.currentIndex = this.fileList.findIndex(file => file.filename === fileInfo.filename)
-				this.updatePreviousNext()
+					// filter out the unwanted mimes
+					const filteredFiles = fileList.filter(file => file.mime && mimes.indexOf(file.mime) !== -1)
+
+					logger.debug('[Viewer] Files after MIME filtering', {
+						beforeFilter: fileList.length,
+						afterFilter: filteredFiles.length,
+						allowedMimes: mimes,
+					})
+
+					// If no files match the filter, keep single file mode
+					if (filteredFiles.length === 0) {
+						logger.warn('[Viewer] No files match MIME filter, using single file mode', {
+							availableMimes: [...new Set(fileList.map(f => f.mime))],
+							allowedMimes: mimes,
+						})
+						this.updatePreviousNext()
+						return
+					}
+
+					// sort like the files list
+					// TODO: implement global sorting API
+					// https://github.com/nextcloud/server/blob/a83b79c5f8ab20ed9b4d751167417a65fa3c42b8/apps/files/lib/Controller/ApiController.php#L247
+					const nodes = filteredFiles.map(
+						file => new NcFile({
+							source: davRemoteURL + davGetRootPath() + file.filename,
+							id: file.fileid,
+							displayname: file.displayname,
+							mime: file.mime,
+							mtime: new Date(file.lastmod),
+							owner: this.currentFile.ownerId,
+							root: davGetRootPath(),
+						}),
+					)
+					const sortedNodes = sortNodes(nodes, {
+						sortingMode: this.sortingConfig.key,
+						sortingOrder: this.sortingConfig.asc ? 'asc' : 'desc',
+					})
+
+					// Map sorted nodes back to file info objects, filtering out any undefined entries
+					const sortedFileList = sortedNodes
+						.map(node => filteredFiles.find(file => file.filename === node.path))
+						.filter(file => file !== undefined)
+
+					// Only update fileList if we have valid files
+					if (sortedFileList.length > 0) {
+						this.fileList = sortedFileList
+						// store current position
+						this.currentIndex = this.fileList.findIndex(file => file.filename === fileInfo.filename)
+
+						// If current file not found in list, add it
+						if (this.currentIndex === -1) {
+							logger.warn('[Viewer] Current file not found in sorted list, prepending it', {
+								filename: fileInfo.filename,
+							})
+							this.fileList.unshift(fileInfo)
+							this.currentIndex = 0
+						}
+
+						logger.debug('[Viewer] Navigation file list updated', {
+							fileCount: this.fileList.length,
+							currentIndex: this.currentIndex,
+							hasNavigation: this.fileList.length > 1,
+						})
+					}
+
+					this.updatePreviousNext()
+				} catch (error) {
+					// Handle cancelled requests gracefully
+					if (error.name === 'AbortError') {
+						logger.debug('[Viewer] Folder request was cancelled')
+					} else {
+						logger.error('[Viewer] Error fetching folder contents for navigation', {
+							dirPath,
+							error: error.message || error,
+						})
+					}
+					// Keep single file mode on error - fileList already set to [fileInfo]
+					this.updatePreviousNext()
+				}
 			} else {
+				// No group or embedded mode - single file navigation
+				if (!group) {
+					logger.debug('[Viewer] MIME type not in any group, navigation disabled', {
+						mime,
+						registeredGroups: Object.keys(this.mimeGroups),
+					})
+				}
 				this.currentIndex = 0
 				this.fileList = [fileInfo]
 			}
