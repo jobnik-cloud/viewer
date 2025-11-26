@@ -49,6 +49,6 @@ jobs:
 
       - name: Restart Nextcloud deployment
         run: |
-          kubectl rollout restart deployment/nextcloud -n jobcloud
-          kubectl rollout status deployment/nextcloud -n jobcloud --timeout=5m
+          kubectl rollout restart deployment/jobcloud-nextcloud -n jobcloud
+          kubectl rollout status deployment/jobcloud-nextcloud -n jobcloud --timeout=5m
           echo "Server deployment restarted successfully. New viewer app image will be pulled."
