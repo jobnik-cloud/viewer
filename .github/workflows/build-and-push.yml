@@ -38,3 +38,17 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > /tmp/kubeconfig
+          echo "KUBECONFIG=/tmp/kubeconfig" >> $GITHUB_ENV
+
+      - name: Restart Nextcloud deployment
+        run: |
+          kubectl rollout restart deployment/nextcloud -n jobcloud
+          kubectl rollout status deployment/nextcloud -n jobcloud --timeout=5m
+          echo "Server deployment restarted successfully. New viewer app image will be pulled."
